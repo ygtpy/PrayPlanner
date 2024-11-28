@@ -45,5 +45,9 @@ python main.py
 
 ### v1.0.0 (10 Ekim 2024)
 - İlk kararlı sürüm yayınlandı
-- Temel namaz vakti görüntüleme
-- Basit program takibi
+- Temel namaz vakti görüntüleme 
+- Basit program takibi 
+  
+## Lisans
+
+Bu proje Apache License 2.0 altında lisanslanmıştır. Detaylı bilgi için [LICENSE](LICENSE) dosyasına bakınız.
