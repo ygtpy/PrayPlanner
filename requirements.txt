@@ -2,3 +2,7 @@ tkinter
 requests
 beautifulsoup4
 pytz
+sv_ttk
+ttkthemes
+pillow
+win10toast

@@ -1,148 +1,337 @@
 import tkinter as tk
-from tkinter import ttk
-import datetime
+from tkinter import ttk, messagebox
 import requests
 from bs4 import BeautifulSoup
-import pytz
+from datetime import datetime, timedelta
+import re
+import sv_ttk  # Modern tema için
+from ttkthemes import ThemedTk  # Ek temalar için
+from PIL import Image, ImageTk
+import os
+from win10toast import ToastNotifier
 
-class PrayerTimesApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Namaz Vakitleri ve Günlük Program")
-        self.root.geometry("800x600") 
+def get_prayer_times():
+    iframe_url = "https://m.dinimizislam.com/NamazVakti_HP/namazvakti.asp?ff=Arial&fs=16"
+    try:
+        response = requests.get(iframe_url)
+        response.raise_for_status()
         
-        # Namaz vakitleri
-        self.prayer_times = {
-            "Sabah": "6:29",
-            "Öğle": "13:03",
-            "İkindi": "15:30",
-            "Akşam": "17:46",
-            "Yatsı": "19:21"
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        prayer_times = {}
+        table = soup.find('table', class_='table table-sm table-striped mb-0')
+        if table:
+            rows = table.find_all('tr')
+            for row in rows:
+                cells = row.find_all('td')
+                if len(cells) == 2:
+                    name = cells[0].text.strip()
+                    time = cells[1].text.strip()
+                    if name in ['Sabah', 'Öğle', 'İkindi', 'Akşam', 'Yatsı']:
+                        prayer_times[name] = time
+        
+        return prayer_times
+    except requests.exceptions.RequestException as e:
+        messagebox.showerror("Hata", f"Bağlantı hatası: {e}")
+        return {}
+
+def add_minutes(time_str, minutes):
+    time = datetime.strptime(time_str, "%H:%M")
+    new_time = time + timedelta(minutes=minutes)
+    return new_time.strftime("%H:%M")
+
+def subtract_minutes(time_str, minutes):
+    time = datetime.strptime(time_str, "%H:%M")
+    new_time = time - timedelta(minutes=minutes)
+    return new_time.strftime("%H:%M")
+
+def update_schedule(prayer_times):
+    # Sabit süreli etkinlikler için buffer süreleri
+    PRAYER_BUFFER_BEFORE = 15  # Namaz öncesi hazırlık süresi
+    PRAYER_DURATION = {
+        'Sabah': 25,
+        'Öğle': 20,
+        'İkindi': 20,
+        'Akşam': 25,
+        'Yatsı': 25
+    }
+    
+    schedule = []
+    
+    # Sabah rutini
+    if 'Sabah' in prayer_times:
+        sabah_time = datetime.strptime(prayer_times['Sabah'], "%H:%M")
+        wakeup_time = (sabah_time - timedelta(minutes=120)).strftime("%H:%M")  # Sabah namazından 2 saat önce
+        
+        schedule.extend([
+            (wakeup_time, "Uyanış"),
+            (f"{wakeup_time} - {add_minutes(wakeup_time, 30)}", "Abdest ve Teheccüd namazı"),
+            (f"{add_minutes(wakeup_time, 30)} - {add_minutes(wakeup_time, 60)}", "Kitap okuma (30 dk)"),
+            (f"{add_minutes(wakeup_time, 60)} - {subtract_minutes(prayer_times['Sabah'], PRAYER_BUFFER_BEFORE)}", "Kuran okuma ve zikir"),
+            (f"{subtract_minutes(prayer_times['Sabah'], PRAYER_BUFFER_BEFORE)} - {add_minutes(prayer_times['Sabah'], PRAYER_DURATION['Sabah'])}", "Sabah namazı"),
+        ])
+        
+        work_start = add_minutes(prayer_times['Sabah'], PRAYER_DURATION['Sabah'])
+        
+        # Sabah namazı sonrası 
+        schedule.extend([
+            (f"{work_start} - {add_minutes(work_start, 60)}", "İngilizce çalışma (1 saat)"),
+            (f"{add_minutes(work_start, 60)} - {add_minutes(work_start, 120)}", "Kahvaltı ve hazırlık"),
+            (f"{add_minutes(work_start, 120)} - 10:30", "1. Yazılım projesi çalışması"),
+            ("10:30 - 11:00", "Kısa mola ve hafif atıştırmalık")
+        ])
+    
+    # Öğle 
+    if 'Öğle' in prayer_times:
+        ogle_start = subtract_minutes(prayer_times['Öğle'], PRAYER_BUFFER_BEFORE)
+        schedule.extend([
+            (f"11:00 - {ogle_start}", "2. Yazılım projesi çalışması"),
+            (f"{ogle_start} - {add_minutes(prayer_times['Öğle'], PRAYER_DURATION['Öğle'])}", "Öğle namazı"),
+            (f"{add_minutes(prayer_times['Öğle'], PRAYER_DURATION['Öğle'])} - {add_minutes(prayer_times['Öğle'], 60)}", "Öğle yemeği"),
+            (f"{add_minutes(prayer_times['Öğle'], 60)} - {add_minutes(prayer_times['Öğle'], 120)}", "Dinlenme ve kısa uyku")
+        ])
+        
+        work_restart = add_minutes(prayer_times['Öğle'], 120)
+    
+    # İkindi 
+    if 'İkindi' in prayer_times:
+        ikindi_start = subtract_minutes(prayer_times['İkindi'], PRAYER_BUFFER_BEFORE)
+        schedule.extend([
+            (f"{work_restart} - {ikindi_start}", "3. Yazılım projesi çalışması"),
+            (f"{ikindi_start} - {add_minutes(prayer_times['İkindi'], PRAYER_DURATION['İkindi'])}", "İkindi namazı"),
+            (f"{add_minutes(prayer_times['İkindi'], PRAYER_DURATION['İkindi'])} - {subtract_minutes(prayer_times['Akşam'], 60)}", "Yeni teknolojiler öğrenme")
+        ])
+    
+    # Akşam 
+    if 'Akşam' in prayer_times:
+        aksam_start = subtract_minutes(prayer_times['Akşam'], PRAYER_BUFFER_BEFORE)
+        schedule.extend([
+            (f"{subtract_minutes(prayer_times['Akşam'], 60)} - {aksam_start}", "Spor/Yürüyüş"),
+            (f"{aksam_start} - {add_minutes(prayer_times['Akşam'], PRAYER_DURATION['Akşam'])}", "Akşam namazı")
+        ])
+    
+    # Yatsı ve gece 
+    if 'Yatsı' in prayer_times:
+        yatsi_start = subtract_minutes(prayer_times['Yatsı'], PRAYER_BUFFER_BEFORE)
+        schedule.extend([
+            (f"{add_minutes(prayer_times['Akşam'], PRAYER_DURATION['Akşam'])} - {yatsi_start}", "Akşam yemeği ve aile zamanı"),
+            (f"{yatsi_start} - {add_minutes(prayer_times['Yatsı'], PRAYER_DURATION['Yatsı'])}", "Yatsı namazı"),
+            (f"{add_minutes(prayer_times['Yatsı'], PRAYER_DURATION['Yatsı'])} - 22:00", "Aile ile sohbet / Sosyal medya kontrolü"),
+            ("22:00 - 22:30", "Kitap okuma (30 dk)"),
+            ("22:30 - 23:00", "Ertesi gün planlaması ve hazırlık"),
+            ("23:00", "Yatış")
+        ])
+    
+    return schedule
+
+class App(ThemedTk):  # tk.Tk yerine ThemedTk kullanıyoruz
+    def __init__(self):
+        super().__init__()
+        
+        self.toaster = ToastNotifier()
+
+        # Tema ayarları
+        self.set_theme("arc")  # Modern flat tema
+        sv_ttk.set_theme("light")  # Sun Valley teması
+        
+        self.title("Namaz Vakitleri ve Günlük Program")
+        self.geometry("1200x800")
+        self.configure(bg='#f0f0f0')  # Açık gri arka plan
+        
+        # Stil ayarları
+        self.style = ttk.Style()
+        self.style.configure("Card.TFrame", background="#ffffff", relief="flat")
+        self.style.configure("Title.TLabel", font=("Segoe UI", 16, "bold"), background="#ffffff")
+        self.style.configure("Prayer.TLabel", font=("Segoe UI", 12), background="#ffffff", padding=10)
+        self.style.configure("Current.TLabel", background="#e3f2fd", font=("Segoe UI", 12, "bold"))
+        
+        # Ana container
+        self.main_container = ttk.Frame(self)
+        self.main_container.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Grid yapısı için ağırlıklar
+        self.main_container.grid_columnconfigure(0, weight=1)
+        self.main_container.grid_columnconfigure(1, weight=3)
+
+        self.prayer_labels = {}
+        self.schedule = []
+        self.create_widgets()
+        
+        # İlk programı oluştur
+        self.update_program()
+        
+        # Otomatik güncelleme
+        self.after(1800000, self.auto_update)
+
+    def create_widgets(self):
+        # Sol panel - Namaz vakitleri
+        left_panel = ttk.Frame(self.main_container, style="Card.TFrame")
+        left_panel.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        
+        # Başlık ve tarih
+        header_frame = ttk.Frame(left_panel, style="Card.TFrame")
+        header_frame.pack(fill="x", padx=10, pady=10)
+        
+        title_label = ttk.Label(header_frame, text="Namaz Vakitleri", style="Title.TLabel")
+        title_label.pack(side="top", pady=5)
+        
+        date_label = ttk.Label(header_frame, 
+                             text=f"{datetime.now().strftime('%d %B %Y %A')}", 
+                             font=("Segoe UI", 10))
+        date_label.pack(side="top")
+        
+        # Namaz vakitleri kartları
+        prayer_frame = ttk.Frame(left_panel, style="Card.TFrame")
+        prayer_frame.pack(fill="x", padx=10, pady=10)
+        
+        prayer_icons = {
+            'Sabah': '🌅',
+            'Öğle': '🌞',
+            'İkindi': '🌤️',
+            'Akşam': '🌅',
+            'Yatsı': '🌙'
         }
         
-        # Günlük planlar
-        self.schedule = [
-            ("05:00 - 6:29", "Kuran okuma veya zikir"),
-            ("6:29 - 06:52", "Sabah namazı"),
-            ("06:52 - 07:52", "İngilizce çalışma (1 saat)"),
-            ("07:52 - 08:52", "Kahvaltı ve hazırlık"),
-            ("08:52 - 10:30", "1. Yazılım projesi çalışması"),
-            ("10:30 - 11:00", "Kısa mola ve hafif atıştırmalık"),
-            ("11:00 - 13:03", "2. Yazılım projesi çalışması"),
-            ("13:03 - 13:22", "Öğle namazı"),
-            ("13:22 - 13:52", "Öğle yemeği"),
-            ("13:52 - 14:52", "Dinlenme (1 saat uyku)"),
-            ("14:52 - 15:30", "3. Yazılım projesi çalışması"),
-            ("15:30 - 15:56", "İkindi namazı ve kısa mola"),
-            ("15:56 - 18:20", "Yeni yazılım dilleri ve teknolojiler üzerine çalışma"),
-            ("18:20 - 18:43", "Aile ile kısa vakit geçirme"),
-            ("17:46 - 18:18", "Akşam namazı"),
-            ("18:18 - 19:21", "Akşam yemeği ve aile ile sohbet"),
-            ("19:21 - 19:43", "Yatsı namazı"),
-            ("19:43 - 22:00", "Aile ile kaliteli zaman veya kişisel aktiviteler"),
-            ("22:00 - 22:30", "Kitap okuma (30 dakika)"),
-            ("22:30 - 23:00", "Ertesi gün için hazırlık"),
-            ("23:00", "Yatış")
-        ]
+        # Grid sistemi kullanarak düzenli hizalama
+        for i, prayer in enumerate(['Sabah', 'Öğle', 'İkindi', 'Akşam', 'Yatsı']):
+            prayer_card = ttk.Frame(prayer_frame, style="Card.TFrame")
+            prayer_card.pack(fill="x", pady=5)
+            
+            # Grid ile yerleşim
+            prayer_card.grid_columnconfigure(1, weight=1)  # Orta sütunu esnek yap
+            
+            icon_label = ttk.Label(prayer_card, text=prayer_icons[prayer], 
+                                 font=("Segoe UI", 18), style="Prayer.TLabel",
+                                 width=3)  # Sabit genişlik
+            icon_label.grid(row=0, column=0, padx=5)
+            
+            name_label = ttk.Label(prayer_card, text=f"{prayer}:", 
+                                 font=("Segoe UI", 12),
+                                 style="Prayer.TLabel",
+                                 width=8)  # Sabit genişlik
+            name_label.grid(row=0, column=1, padx=5, sticky="w")
+            
+            time_label = ttk.Label(prayer_card, text="--:--",
+                                 font=("Segoe UI", 12), 
+                                 style="Prayer.TLabel")
+            time_label.grid(row=0, column=2, padx=10, sticky="e")
+            
+            self.prayer_labels[prayer] = time_label
         
-        self.setup_ui()
-        self.update_current_time()
-        self.fetch_prayer_times()
+        # Güncelleme butonu
+        update_btn = ttk.Button(left_panel, text="Programı Güncelle", 
+                              command=self.update_program, 
+                              style="Accent.TButton")
+        update_btn.pack(pady=20)
         
-    def setup_ui(self):
-        # Namaz vakitleri frame
-        prayer_frame = ttk.LabelFrame(self.root, text="Namaz Vakitleri")
-        prayer_frame.pack(fill="x", padx=5, pady=5)
+        # Sağ panel - Program tablosu
+        right_panel = ttk.Frame(self.main_container, style="Card.TFrame")
+        right_panel.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         
-        # Namaz vakitleri display
-        prayer_text = " ".join([f"{name}: {time}" for name, time in self.prayer_times.items()])
-        self.prayer_label = ttk.Label(prayer_frame, text=prayer_text)
-        self.prayer_label.pack(pady=5)
+        # Program başlığı
+        program_title = ttk.Label(right_panel, text="Günlük Programım", 
+                                style="Title.TLabel")
+        program_title.pack(pady=10)
         
-        # program frame
-        schedule_frame = ttk.LabelFrame(self.root, text="Günlük Program")
-        schedule_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        # Tablo container
+        table_container = ttk.Frame(right_panel)
+        table_container.pack(fill="both", expand=True, padx=10, pady=5)
         
-        # program table oluştur
-        self.tree = ttk.Treeview(schedule_frame, columns=("Time", "Activity"), show="headings")
-        self.tree.heading("Time", text="Saat")
-        self.tree.heading("Activity", text="Aktivite")
-        
-        # Configure column
-        self.tree.column("Time", width=150)
-        self.tree.column("Activity", width=600)
-        
-        # ekle program items
-        for time, activity in self.schedule:
-            self.tree.insert("", "end", values=(time, activity))
-        
-        # scrollbar ekle
-        scrollbar = ttk.Scrollbar(schedule_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        
-        # arayüz düzen
-        self.tree.pack(side="left", fill="both", expand=True)
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(table_container)
         scrollbar.pack(side="right", fill="y")
         
-        # güncelleme button
-        update_button = ttk.Button(self.root, text="Programı Güncelle", command=self.update_schedule)
-        update_button.pack(pady=5)
+        # Program tablosu
+        self.schedule_tree = ttk.Treeview(table_container, 
+                                        columns=("Saat", "Aktivite"),
+                                        show="headings",
+                                        style="Custom.Treeview")
         
-    def update_current_time(self):
-        # anlık görev
-        now = datetime.datetime.now()
-        current_time = now.strftime("%H:%M")
+        # Tablo stilleri
+        self.style.configure("Custom.Treeview",
+                           background="#ffffff",
+                           fieldbackground="#ffffff",
+                           rowheight=30,
+                           font=("Segoe UI", 10))
         
-        # Önceki vurgulamayı temizle
-        for item in self.tree.get_children():
-            self.tree.item(item, tags=())
+        self.style.configure("Custom.Treeview.Heading",
+                           font=("Segoe UI", 11, "bold"))
         
-        # geçerli zamanı vurgula
-        for item in self.tree.get_children():
-            time_slot = self.tree.item(item)["values"][0]
-            if self.is_current_time_slot(time_slot, current_time):
-                self.tree.item(item, tags=("current",))
+        # Tablo başlıkları
+        self.schedule_tree.heading("Saat", text="Saat")
+        self.schedule_tree.heading("Aktivite", text="Aktivite")
         
-        # vurgulama rengi
-        self.tree.tag_configure("current", background="red")
+        # Sütun genişlikleri
+        self.schedule_tree.column("Saat", width=150, minwidth=150)
+        self.schedule_tree.column("Aktivite", width=400, minwidth=300)
         
+        self.schedule_tree.pack(side="left", fill="both", expand=True)
         
-        self.root.after(60000, self.update_current_time)  # dakikalık yenileme
+        # Scrollbar bağlantısı
+        scrollbar.config(command=self.schedule_tree.yview)
+        self.schedule_tree.config(yscrollcommand=scrollbar.set)
         
-    def is_current_time_slot(self, time_slot, current_time):
-        if "-" not in time_slot:
-            return False
-            
-        start_time, end_time = time_slot.split(" - ")
-        current_minutes = self.time_to_minutes(current_time)
-        start_minutes = self.time_to_minutes(start_time)
-        end_minutes = self.time_to_minutes(end_time)
-        
-        return start_minutes <= current_minutes < end_minutes
-        
-    def time_to_minutes(self, time_str):
-        try:
-            hours, minutes = map(int, time_str.split(":"))
-            return hours * 60 + minutes
-        except:
-            return 0
-            
-    def fetch_prayer_times(self):
-        try:
-            url = "https://m.dinimizislam.com/NamazVakti_HP/namazvakti.asp?ff=Arial&fs=16"
-            response = requests.get(url)
-            soup = BeautifulSoup(response.content, "html.parser")
+        # Tablo satır renkleri
+        self.schedule_tree.tag_configure('current', 
+                                       background='#e3f2fd',
+                                       font=("Segoe UI", 10, "bold"))
+        self.schedule_tree.tag_configure('even', background='#fafafa')
+        self.schedule_tree.tag_configure('odd', background='#ffffff')
 
+    def update_program(self):
+        prayer_times = get_prayer_times()
+        
+        if not prayer_times:
+            messagebox.showwarning("Uyarı", 
+                                 "Namaz vakitleri alınamadı. "
+                                 "Lütfen internet bağlantınızı kontrol edin.",
+                                 parent=self)
+            return
             
-        except Exception as e:
-            print(f"Error fetching prayer times: {e}")
+        # Namaz vakitlerini güncelle
+        for prayer, time in prayer_times.items():
+            if prayer in self.prayer_labels:
+                self.prayer_labels[prayer].config(text=time)
+
+        # Günlük programı güncelle
+        self.schedule = update_schedule(prayer_times)
+        
+        # Treeview'ı temizle
+        for item in self.schedule_tree.get_children():
+            self.schedule_tree.delete(item)
+        
+        # Yeni programı ekle
+        current_time = datetime.now().time()
+        for i, (time_range, activity) in enumerate(self.schedule):
+            tags = []
+            if i % 2 == 0:
+                tags.append('even')
+            else:
+                tags.append('odd')
+                
+            if ' - ' in time_range:
+                start_time = datetime.strptime(time_range.split(' - ')[0], 
+                                             "%H:%M").time()
+                end_time = datetime.strptime(time_range.split(' - ')[1], 
+                                           "%H:%M").time()
+                if start_time <= current_time <= end_time:
+                    tags.append('current')
             
-    def update_schedule(self):
-        # Refresh 
-        self.update_current_time()
-        self.fetch_prayer_times()
+            self.schedule_tree.insert("", "end", 
+                                    values=(time_range, activity), 
+                                    tags=tags)
+        update_time = datetime.now().strftime("%H:%M")
+        self.toaster.show_toast(
+            "Program Güncellendi",
+            f"Namaz vakitleri ve program {update_time}'de güncellendi.",
+            duration=5,
+            threaded=True  # Bildirim ana programı bloklamasın
+    )
+
+    def auto_update(self):
+        self.update_program()
+        self.after(1800000, self.auto_update)
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = PrayerTimesApp(root)
-    root.mainloop()
+    app = App()
+    # app.mainloop()
