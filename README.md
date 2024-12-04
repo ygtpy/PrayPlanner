@@ -2,21 +2,26 @@
 
  Namaz vakitlerine uygun günlük program takibi için geliştirilmiş bir masaüstü uygulaması.
 
-## Özellikler
+## Güncelleme Geçmişi
 
-### Version 1.0.0
-- Namaz vakitlerini görüntüleme
-- Günlük program takibi
-- Anlık zaman gösterimi
-- Program güncelleme özelliği
+### v2.0.1 (4 Aralık 2024)
+- Şehir seçimi özelliği eklendi
+- 81 il desteği
+- Seçilen şehrin kaydedilmesi
+- Seçilen şehre göre namaz vakitleri görüntüleme
+- Şehir bazlı bildirim sistemi
 
-### Version 2.0.0
-- Modern ve gelişmiş kullanıcı arayüzü
-- Bildirim sistemi entegrasyonu
-- Otomatik program güncelleme
-- Emoji destekli görsel iyileştirmeler
-- ThemedTk ile tema desteği
-- Sun Valley tema entegrasyonu
+### v2.0.0 (27 Kasım 2024)
+- Tamamen yenilenmiş modern arayüz
+- Bildirim sistemi eklendi
+- Tema desteği eklendi
+- Program hatırlatıcıları eklendi
+
+### v1.0.0 (10 Ekim 2024)
+- İlk kararlı sürüm yayınlandı
+- Temel namaz vakti görüntüleme 
+- Basit program takibi 
+
 
 ## Kurulum
 
@@ -35,18 +40,6 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## Güncelleme Geçmişi
-
-### v2.0.0 (27 Kasım 2024)
-- Tamamen yenilenmiş modern arayüz
-- Bildirim sistemi eklendi
-- Tema desteği eklendi
-- Program hatırlatıcıları eklendi
-
-### v1.0.0 (10 Ekim 2024)
-- İlk kararlı sürüm yayınlandı
-- Temel namaz vakti görüntüleme 
-- Basit program takibi 
   
 ## Lisans
 

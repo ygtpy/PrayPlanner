@@ -4,36 +4,12 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import re
-import sv_ttk  # Modern tema için
-from ttkthemes import ThemedTk  # Ek temalar için
+import sv_ttk
+from ttkthemes import ThemedTk
 from PIL import Image, ImageTk
 import os
 from win10toast import ToastNotifier
-
-def get_prayer_times():
-    iframe_url = "https://m.dinimizislam.com/NamazVakti_HP/namazvakti.asp?ff=Arial&fs=16"
-    try:
-        response = requests.get(iframe_url)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        prayer_times = {}
-        table = soup.find('table', class_='table table-sm table-striped mb-0')
-        if table:
-            rows = table.find_all('tr')
-            for row in rows:
-                cells = row.find_all('td')
-                if len(cells) == 2:
-                    name = cells[0].text.strip()
-                    time = cells[1].text.strip()
-                    if name in ['Sabah', 'Öğle', 'İkindi', 'Akşam', 'Yatsı']:
-                        prayer_times[name] = time
-        
-        return prayer_times
-    except requests.exceptions.RequestException as e:
-        messagebox.showerror("Hata", f"Bağlantı hatası: {e}")
-        return {}
+import json
 
 def add_minutes(time_str, minutes):
     time = datetime.strptime(time_str, "%H:%M")
@@ -124,19 +100,25 @@ def update_schedule(prayer_times):
     
     return schedule
 
-class App(ThemedTk):  # tk.Tk yerine ThemedTk kullanıyoruz
+class App(ThemedTk):
     def __init__(self):
         super().__init__()
+        
+        # Şehir verilerini saklamak için dictionary
+        self.cities = {}
+        
+        # Config dosyası yolu
+        self.config_file = "app_config.json"
         
         self.toaster = ToastNotifier()
 
         # Tema ayarları
-        self.set_theme("arc")  # Modern flat tema
-        sv_ttk.set_theme("light")  # Sun Valley teması
+        self.set_theme("arc")
+        sv_ttk.set_theme("light")
         
-        self.title("Namaz Vakitleri ve Günlük Program")
+        self.title("PrayPlanner V2.0.1")
         self.geometry("1200x800")
-        self.configure(bg='#f0f0f0')  # Açık gri arka plan
+        self.configure(bg='#f0f0f0')
         
         # Stil ayarları
         self.style = ttk.Style()
@@ -155,7 +137,15 @@ class App(ThemedTk):  # tk.Tk yerine ThemedTk kullanıyoruz
 
         self.prayer_labels = {}
         self.schedule = []
+        
+        # Şehir listesini yükle
+        self.load_cities()
+        
+        # Widget'ları oluştur
         self.create_widgets()
+        
+        # Kayıtlı şehri yükle ve uygula
+        self.load_saved_city()
         
         # İlk programı oluştur
         self.update_program()
@@ -163,10 +153,55 @@ class App(ThemedTk):  # tk.Tk yerine ThemedTk kullanıyoruz
         # Otomatik güncelleme
         self.after(1800000, self.auto_update)
 
+    def load_cities(self):
+        try:
+            url = "https://m.dinimizislam.com/NamazVakti_HP/namazvakti.asp"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/100.0'
+            }
+            
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            select = soup.find('select', {'name': 'id'})
+            if select:
+                options = select.find_all('option')
+                if options:
+                    for option in options:
+                        city_name = option.text.strip()
+                        city_id = option['value']
+                        self.cities[city_name] = city_id
+                else:
+                    raise Exception("Şehir listesi boş!")
+            else:
+                raise Exception("Şehir seçim listesi bulunamadı!")
+                
+        except Exception as e:
+            messagebox.showerror("Hata", f"Şehir listesi yüklenirken hata oluştu: {str(e)}")
+            self.cities = {"İstanbul": "17300"}  # Varsayılan şehir
+
     def create_widgets(self):
         # Sol panel - Namaz vakitleri
         left_panel = ttk.Frame(self.main_container, style="Card.TFrame")
         left_panel.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        
+        # Şehir seçimi için frame
+        city_frame = ttk.Frame(left_panel, style="Card.TFrame")
+        city_frame.pack(fill="x", padx=10, pady=5)
+        
+        city_label = ttk.Label(city_frame, text="Şehir Seçin:", 
+                             font=("Segoe UI", 10), style="Prayer.TLabel")
+        city_label.pack(side="left", padx=5)
+        
+        # Şehir seçimi için Combobox
+        self.city_combobox = ttk.Combobox(city_frame, 
+                                         values=list(self.cities.keys()),
+                                         state="readonly",
+                                         font=("Segoe UI", 10))
+        self.city_combobox.pack(side="left", fill="x", expand=True, padx=5)
+        self.city_combobox.bind('<<ComboboxSelected>>', self.on_city_select)
         
         # Başlık ve tarih
         header_frame = ttk.Frame(left_panel, style="Card.TFrame")
@@ -198,17 +233,17 @@ class App(ThemedTk):  # tk.Tk yerine ThemedTk kullanıyoruz
             prayer_card.pack(fill="x", pady=5)
             
             # Grid ile yerleşim
-            prayer_card.grid_columnconfigure(1, weight=1)  # Orta sütunu esnek yap
+            prayer_card.grid_columnconfigure(1, weight=1)
             
             icon_label = ttk.Label(prayer_card, text=prayer_icons[prayer], 
                                  font=("Segoe UI", 18), style="Prayer.TLabel",
-                                 width=3)  # Sabit genişlik
+                                 width=3)
             icon_label.grid(row=0, column=0, padx=5)
             
             name_label = ttk.Label(prayer_card, text=f"{prayer}:", 
                                  font=("Segoe UI", 12),
                                  style="Prayer.TLabel",
-                                 width=8)  # Sabit genişlik
+                                 width=8)
             name_label.grid(row=0, column=1, padx=5, sticky="w")
             
             time_label = ttk.Label(prayer_card, text="--:--",
@@ -230,7 +265,7 @@ class App(ThemedTk):  # tk.Tk yerine ThemedTk kullanıyoruz
         
         # Program başlığı
         program_title = ttk.Label(right_panel, text="Günlük Programım", 
-                                style="Title.TLabel")
+                                style="Title.TLabel",font=("nsew",15))
         program_title.pack(pady=10)
         
         # Tablo container
@@ -278,8 +313,88 @@ class App(ThemedTk):  # tk.Tk yerine ThemedTk kullanıyoruz
         self.schedule_tree.tag_configure('even', background='#fafafa')
         self.schedule_tree.tag_configure('odd', background='#ffffff')
 
+    def load_saved_city(self):
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    saved_city = config.get('selected_city', None)
+                    if saved_city and saved_city in self.cities:
+                        self.city_combobox.set(saved_city)
+                    else:
+                        # Varsayılan şehri seç
+                        self.city_combobox.set(list(self.cities.keys())[0])
+            else:
+                # Varsayılan şehri seç
+                self.city_combobox.set(list(self.cities.keys())[0])
+        except Exception as e:
+            messagebox.showerror("Hata", f"Kayıtlı şehir yüklenirken hata oluştu: {str(e)}")
+            self.city_combobox.set(list(self.cities.keys())[0])
+
+    def save_selected_city(self, city):
+        try:
+            config = {}
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+            
+            config['selected_city'] = city
+            
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            messagebox.showerror("Hata", f"Şehir kaydedilirken hata oluştu: {str(e)}")
+
+    def on_city_select(self, event=None):
+        selected_city = self.city_combobox.get()
+        self.save_selected_city(selected_city)
+        self.update_program()
+
+    def get_prayer_times(self):
+        selected_city = self.city_combobox.get()
+        
+        if not selected_city or selected_city not in self.cities:
+            messagebox.showerror("Hata", "Lütfen geçerli bir şehir seçin!")
+            return {}
+            
+        try:
+            city_id = self.cities[selected_city]
+            url = "https://m.dinimizislam.com/NamazVakti_HP/namazvakti.asp"
+            params = {
+                'id': city_id,
+                'ff': 'Arial',
+                'fs': '16'
+            }
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/100.0'
+            }
+            
+            response = requests.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            prayer_times = {}
+            table = soup.find('table', class_='table table-sm table-striped mb-0')
+            if table:
+                rows = table.find_all('tr')
+                for row in rows:
+                    cells = row.find_all('td')
+                    if len(cells) == 2:
+                        name = cells[0].text.strip()
+                        time = cells[1].text.strip()
+                        if name in ['Sabah', 'Öğle', 'İkindi', 'Akşam', 'Yatsı']:
+                            prayer_times[name] = time
+            
+            return prayer_times
+            
+        except Exception as e:
+            messagebox.showerror("Hata", f"Namaz vakitleri alınırken hata oluştu: {str(e)}")
+            return {}
+
     def update_program(self):
-        prayer_times = get_prayer_times()
+        prayer_times = self.get_prayer_times()
         
         if not prayer_times:
             messagebox.showwarning("Uyarı", 
@@ -320,18 +435,20 @@ class App(ThemedTk):  # tk.Tk yerine ThemedTk kullanıyoruz
             self.schedule_tree.insert("", "end", 
                                     values=(time_range, activity), 
                                     tags=tags)
+
+        selected_city = self.city_combobox.get()
         update_time = datetime.now().strftime("%H:%M")
         self.toaster.show_toast(
             "Program Güncellendi",
-            f"Namaz vakitleri ve program {update_time}'de güncellendi.",
+            f"{selected_city} için namaz vakitleri ve program {update_time}'de güncellendi.",
             duration=5,
-            threaded=True  # Bildirim ana programı bloklamasın
-    )
+            threaded=True
+        )
 
     def auto_update(self):
         self.update_program()
-        self.after(1800000, self.auto_update)
+        self.after(1800000, self.auto_update)  # 30 dakikada bir güncelle
 
 if __name__ == "__main__":
     app = App()
-    # app.mainloop()
+    app.mainloop()
